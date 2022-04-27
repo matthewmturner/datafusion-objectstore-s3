@@ -24,11 +24,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::{stream, AsyncRead};
 
-use datafusion::datasource::object_store::SizedFile;
-use datafusion::datasource::object_store::{
+// use datafusion::error::DataFusionError;
+use datafusion_data_access::object_store::{
     FileMeta, FileMetaStream, ListEntryStream, ObjectReader, ObjectStore,
 };
-use datafusion::error::{DataFusionError, Result};
+use datafusion_data_access::{Result, SizedFile};
 
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::{config::Builder, Client, Endpoint, Region, RetryConfig};
@@ -133,7 +133,7 @@ impl ObjectStore for S3FileSystem {
             .prefix(prefix)
             .send()
             .await
-            .map_err(|err| DataFusionError::External(Box::new(S3Error::AWS(format!("{:?}", err)))))?
+            .map_err(|err| S3Error::AWS(format!("{:?}", err)))?
             .contents()
             .unwrap_or_default()
             .to_vec();
@@ -267,24 +267,19 @@ impl ObjectReader for AmazonS3FileReader {
                         let data = res.body.collect().await;
                         match data {
                             Ok(data) => Ok(data.into_bytes()),
-                            Err(err) => Err(DataFusionError::External(Box::new(S3Error::AWS(
-                                format!("{:?}", err),
-                            )))),
+                            Err(err) => Err(S3Error::AWS(format!("{:?}", err))),
                         }
                     }
-                    Err(err) => Err(DataFusionError::External(Box::new(S3Error::AWS(format!(
-                        "{:?}",
-                        err
-                    ))))),
+                    Err(err) => Err(S3Error::AWS(format!("{:?}", err))),
                 };
 
                 tx.send(bytes).unwrap();
             })
         });
 
-        let bytes = rx.recv_timeout(Duration::from_secs(10)).map_err(|err| {
-            DataFusionError::External(Box::new(S3Error::AWS(format!("{:?}", err))))
-        })??;
+        let bytes = rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|err| S3Error::AWS(format!("{:?}", err)))??;
 
         Ok(Box::new(bytes.reader()))
     }
